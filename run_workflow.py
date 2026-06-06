@@ -54,6 +54,7 @@ def run_workflow(workflow, server=None, port=None):
     :param workflow: The workflow JSON dictionary.
     :param server: Server address (IP or hostname)
     :param port: Port number
+    :return: A tuple of (prompt_id, output_images)
     """
     global server_address
     if server and port:
@@ -103,26 +104,7 @@ def run_workflow(workflow, server=None, port=None):
         ws.close()
 
     print(f"Workflow {prompt_id} completed!")
-
-    if output_images:
-        print(f"Saving {len(output_images)} node(s) with images...")
-        for node_id, images in output_images.items():
-            # Determine image format from the node configuration, defaulting to 'png'
-            node_config = workflow.get(node_id, {})
-            img_format = node_config.get('inputs', {}).get('format', 'png')
-            if isinstance(img_format, str):
-                img_format = img_format.lstrip('.')
-            else:
-                img_format = 'png'
-
-            for i, img_data in enumerate(images):
-                filename = f"output_{prompt_id}_{node_id}_{i}.{img_format}"
-                save_image(img_data, filename)
-                print(f"Saved: {filename}")
-    else:
-        print("No image data received!")
-
-    return prompt_id
+    return prompt_id, output_images
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run ComfyUI workflow API JSON")
@@ -137,7 +119,26 @@ if __name__ == "__main__":
         with open(args.workflow_path, 'r') as f:
             workflow = json.load(f)
 
-        run_workflow(workflow, args.server, args.port)
+        prompt_id, output_images = run_workflow(workflow, args.server, args.port)
+
+        if output_images:
+            print(f"Saving {len(output_images)} node(s) with images...")
+            for node_id, images in output_images.items():
+                # Determine image format from the node configuration, defaulting to 'png'
+                node_config = workflow.get(node_id, {})
+                img_format = node_config.get('inputs', {}).get('format', 'png')
+                if isinstance(img_format, str):
+                    img_format = img_format.lstrip('.')
+                else:
+                    img_format = 'png'
+
+                for i, img_data in enumerate(images):
+                    filename = f"output_{prompt_id}_{node_id}_{i}.{img_format}"
+                    save_image(img_data, filename)
+                    print(f"Saved: {filename}")
+        else:
+            print("No image data received!")
+
     except (json.JSONDecodeError, urllib.error.URLError, websocket.WebSocketException, FileNotFoundError) as e:
         print(f"Task failed: {e}")
     except Exception as e:
