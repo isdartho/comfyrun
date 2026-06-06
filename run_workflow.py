@@ -8,6 +8,8 @@ import os
 
 # Configuration Constants
 IMAGE_METADATA_OFFSET = 8 # Offset for binary image data from SaveImageWebsocket
+IMAGE_NODE_CLASS = "ETN_SendImageWebSocket"
+DEFAULT_IMAGE_FORMAT = "png"
 
 server_address = None # Global variable to be set by arguments
 client_id = str(uuid.uuid4())
@@ -92,7 +94,7 @@ def run_workflow(workflow, server=None, port=None):
                             print(f"Current Node: {current_node.get('class_type')}")
                 else:
                     # Binary frame — image data from SaveImageWebsocket
-                    if current_node and current_node.get('class_type') == "ETN_SendImageWebSocket":
+                    if current_node and current_node.get('class_type') == IMAGE_NODE_CLASS:
                         # Use the offset constant for better maintainability
                         images_output = output_images.get(current_node_id, [])
                         images_output.append(out[IMAGE_METADATA_OFFSET:])
@@ -124,13 +126,13 @@ if __name__ == "__main__":
         if output_images:
             print(f"Saving {len(output_images)} node(s) with images...")
             for node_id, images in output_images.items():
-                # Determine image format from the node configuration, defaulting to 'png'
+                # Determine image format from the node configuration, defaulting to DEFAULT_IMAGE_FORMAT
                 node_config = workflow.get(node_id, {})
-                img_format = node_config.get('inputs', {}).get('format', 'png')
+                img_format = node_config.get('inputs', {}).get('format', DEFAULT_IMAGE_FORMAT)
                 if isinstance(img_format, str):
                     img_format = img_format.lstrip('.')
                 else:
-                    img_format = 'png'
+                    img_format = DEFAULT_IMAGE_FORMAT
 
                 for i, img_data in enumerate(images):
                     filename = f"output_{prompt_id}_{node_id}_{i}.{img_format}"
