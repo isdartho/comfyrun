@@ -4,9 +4,27 @@ import json
 import urllib.request
 import urllib.parse
 import argparse
+import os
 
 server_address = None # Global variable to be set by arguments
 client_id = str(uuid.uuid4())
+
+def save_image(image_data, filename):
+    """
+    Saves image binary data to the output folder.
+    """
+    os.makedirs("output", exist_ok=True)
+    with open(os.path.join("output", filename), "wb") as f:
+        f.write(image_data)
+
+def get_node(workflow, node_id):
+    """
+    Retrieves a node from the workflow by its ID.
+    :param workflow: The workflow JSON dictionary.
+    :param node_id: The ID of the node to retrieve.
+    :return: The node's configuration or None if not found.
+    """
+    return workflow.get(node_id)
 
 def queue_prompt(prompt):
     p = {"prompt": prompt, "client_id": client_id}
@@ -17,7 +35,6 @@ def queue_prompt(prompt):
 def get_history(prompt_id):
     with urllib.request.urlopen(f"http://{server_address}/history/{prompt_id}") as response:
         return json.loads(response.read())
-
 
 def run_workflow(workflow_path, inputs=None, server=None, port=None):
     """
@@ -57,19 +74,30 @@ def run_workflow(workflow_path, inputs=None, server=None, port=None):
                 data = message['data']
                 if data['node'] is None and data['prompt_id'] == prompt_id:
                     break # Execution finished
-                current_node = data['node']
-                print(f"Current Node: {current_node}")
+                current_node_id = data['node']
+                current_node = get_node(workflow, current_node_id)
+                print(f"Current Node: {current_node.get('class_type')}")
         else:
             # Binary frame — image data from SaveImageWebsocket
-            if current_node == "ETN_SendImageWebSocket":
-                images_output = output_images.get(current_node, [])
-                # The first 8 bytes are type/meta, rest is image data
-                images_output.append(out[8:])
-                output_images[current_node] = images_output
+            if current_node:
+                if current_node.get('class_type') == "ETN_SendImageWebSocket":
+                    images_output = output_images.get(current_node_id, [])
+                    # The first 8 bytes are type/meta, rest is image data
+                    images_output.append(out[8:])
+                    output_images[current_node_id] = images_output
 
     print(f"Workflow {prompt_id} completed!")
-    print(f"Received {len(output_images)} image(s) via WebSocket.") if output_images else print("No image data received!")
-    print(json.dumps(output_images))
+
+    if output_images:
+        print(f"Saving {len(output_images)} node(s) with images...")
+        for node_id, images in output_images.items():
+            for i, img_data in enumerate(images):
+                filename = f"output_{prompt_id}_{node_id}_{i}.jpg"
+                save_image(img_data, filename)
+                print(f"Saved: {filename}")
+    else:
+        print("No image data received!")
+
     return prompt_id
 
 if __name__ == "__main__":

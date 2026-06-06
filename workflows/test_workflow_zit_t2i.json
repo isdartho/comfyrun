@@ -1,7 +1,7 @@
 {
   "3": {
     "inputs": {
-      "seed": 88209412183495,
+      "seed": 882094121834990,
       "steps": 9,
       "cfg": 1,
       "sampler_name": "euler",
@@ -127,7 +127,7 @@
   },
   "41": {
     "inputs": {
-      "format": "PNG",
+      "format": "JPEG",
       "images": [
         "8",
         0
