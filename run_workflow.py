@@ -57,6 +57,7 @@ def run_workflow(workflow, server=None, port=None):
     :param server: Server address (IP or hostname)
     :param port: Port number
     :return: A tuple of (prompt_id, output_images)
+    :output_images: {node_id: [{format: JPEG/PNG, data:(binary)}...]}
     """
     global server_address
     if server and port:
@@ -97,7 +98,13 @@ def run_workflow(workflow, server=None, port=None):
                     if current_node and current_node.get('class_type') == IMAGE_NODE_CLASS:
                         # Use the offset constant for better maintainability
                         images_output = output_images.get(current_node_id, [])
-                        images_output.append(out[IMAGE_METADATA_OFFSET:])
+                        # Determine image format from the node configuration, defaulting to DEFAULT_IMAGE_FORMAT
+                        img_format = current_node.get('inputs', {}).get('format', DEFAULT_IMAGE_FORMAT)
+                        if isinstance(img_format, str):
+                            img_format = img_format.lstrip('.')
+                        else:
+                            img_format = DEFAULT_IMAGE_FORMAT
+                        images_output.append({ 'format':img_format, 'data':out[IMAGE_METADATA_OFFSET:] })
                         output_images[current_node_id] = images_output
             except (websocket.WebSocketException, json.JSONDecodeError) as e:
                 print(f"WebSocket error during execution: {e}")
@@ -122,21 +129,14 @@ if __name__ == "__main__":
             workflow = json.load(f)
 
         prompt_id, output_images = run_workflow(workflow, args.server, args.port)
-
         if output_images:
             print(f"Saving {len(output_images)} node(s) with images...")
-            for node_id, images in output_images.items():
-                # Determine image format from the node configuration, defaulting to DEFAULT_IMAGE_FORMAT
-                node_config = workflow.get(node_id, {})
-                img_format = node_config.get('inputs', {}).get('format', DEFAULT_IMAGE_FORMAT)
-                if isinstance(img_format, str):
-                    img_format = img_format.lstrip('.')
-                else:
-                    img_format = DEFAULT_IMAGE_FORMAT
-
-                for i, img_data in enumerate(images):
+            for node_id, images in output_images.items(): #For each node that has image
+                for i, img_data in enumerate(images): #For each image of that node
+                    img_format = img_data['format']
                     filename = f"output_{prompt_id}_{node_id}_{i}.{img_format}"
-                    save_image(img_data, filename)
+                    img_bytes = img_data['data']
+                    save_image(img_bytes, filename)
                     print(f"Saved: {filename}")
         else:
             print("No image data received!")
