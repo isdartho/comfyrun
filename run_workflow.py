@@ -5,6 +5,11 @@ import urllib.request
 import urllib.parse
 import argparse
 import os
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Configuration Constants
 IMAGE_METADATA_OFFSET = 8 # Offset for binary image data from SaveImageWebsocket
@@ -39,7 +44,7 @@ def queue_prompt(prompt):
         with urllib.request.urlopen(req, timeout=30) as response:
             return json.loads(response.read())
     except urllib.error.URLError as e:
-        print(f"Connection error while queueing prompt: {e}")
+        logger.error(f"Connection error while queueing prompt: {e}")
         raise
 
 def get_history(prompt_id):
@@ -47,7 +52,7 @@ def get_history(prompt_id):
         with urllib.request.urlopen(f"http://{server_address}/history/{prompt_id}", timeout=30) as response:
             return json.loads(response.read())
     except urllib.error.URLError as e:
-        print(f"Connection error while fetching history: {e}")
+        logger.error(f"Connection error while fetching history: {e}")
         raise
 
 def run_workflow(workflow, server=None, port=None):
@@ -63,11 +68,11 @@ def run_workflow(workflow, server=None, port=None):
     if server and port:
         server_address = f"{server}:{port}"
 
-    print(f"Queueing workflow...")
+    logger.info("Queueing workflow...")
     try:
         prompt_id = queue_prompt(workflow)['prompt_id']
     except KeyError:
-        print("Server returned unexpected response format.")
+        logger.error("Server returned unexpected response format.")
         raise
 
     # Simple websocket listener to wait for completion
@@ -75,7 +80,7 @@ def run_workflow(workflow, server=None, port=None):
     try:
         ws.connect(f"ws://{server_address}/ws?clientId={client_id}", timeout=30)
 
-        print("Waiting for workflow to complete...")
+        logger.info("Waiting for workflow to complete...")
         current_node = None
         output_images = {}
 
@@ -92,7 +97,7 @@ def run_workflow(workflow, server=None, port=None):
                         current_node_id = data['node']
                         current_node = get_node(workflow, current_node_id)
                         if current_node:
-                            print(f"Current Node: {current_node.get('class_type')}")
+                            logger.info(f"Current Node: {current_node.get('class_type')}")
                 else:
                     # Binary frame — image data from SaveImageWebsocket
                     if current_node and current_node.get('class_type') == IMAGE_NODE_CLASS:
@@ -107,12 +112,12 @@ def run_workflow(workflow, server=None, port=None):
                         images_output.append({ 'format':img_format, 'data':out[IMAGE_METADATA_OFFSET:] })
                         output_images[current_node_id] = images_output
             except (websocket.WebSocketException, json.JSONDecodeError) as e:
-                print(f"WebSocket error during execution: {e}")
+                logger.error(f"WebSocket error during execution: {e}")
                 break
     finally:
         ws.close()
 
-    print(f"Workflow {prompt_id} completed!")
+    logger.info(f"Workflow {prompt_id} completed!")
     return prompt_id, output_images
 
 if __name__ == "__main__":
@@ -130,18 +135,18 @@ if __name__ == "__main__":
 
         prompt_id, output_images = run_workflow(workflow, args.server, args.port)
         if output_images:
-            print(f"Saving {len(output_images)} node(s) with images...")
+            logger.info(f"Saving {len(output_images)} node(s) with images...")
             for node_id, images in output_images.items(): #For each node that has image
                 for i, img_data in enumerate(images): #For each image of that node
                     img_format = img_data['format']
                     filename = f"output_{prompt_id}_{node_id}_{i}.{img_format}"
                     img_bytes = img_data['data']
                     save_image(img_bytes, filename)
-                    print(f"Saved: {filename}")
+                    logger.info(f"Saved: {filename}")
         else:
-            print("No image data received!")
+            logger.warning("No image data received!")
 
     except (json.JSONDecodeError, urllib.error.URLError, websocket.WebSocketException, FileNotFoundError) as e:
-        print(f"Task failed: {e}")
+        logger.error(f"Task failed: {e}")
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        logger.exception(f"An unexpected error occurred: {e}")
