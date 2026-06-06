@@ -6,6 +6,9 @@ import urllib.parse
 import argparse
 import os
 
+# Configuration Constants
+IMAGE_METADATA_OFFSET = 8 # Offset for binary image data from SaveImageWebsocket
+
 server_address = None # Global variable to be set by arguments
 client_id = str(uuid.uuid4())
 
@@ -30,17 +33,25 @@ def queue_prompt(prompt):
     p = {"prompt": prompt, "client_id": client_id}
     data = json.dumps(p).encode('utf-8')
     req = urllib.request.Request(f"http://{server_address}/prompt", data=data)
-    return json.loads(urllib.request.urlopen(req).read())
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return json.loads(response.read())
+    except urllib.error.URLError as e:
+        print(f"Connection error while queueing prompt: {e}")
+        raise
 
 def get_history(prompt_id):
-    with urllib.request.urlopen(f"http://{server_address}/history/{prompt_id}") as response:
-        return json.loads(response.read())
+    try:
+        with urllib.request.urlopen(f"http://{server_address}/history/{prompt_id}", timeout=30) as response:
+            return json.loads(response.read())
+    except urllib.error.URLError as e:
+        print(f"Connection error while fetching history: {e}")
+        raise
 
-def run_workflow(workflow_path, inputs=None, server=None, port=None):
+def run_workflow(workflow, server=None, port=None):
     """
-    Runs a ComfyUI workflow from a JSON file.
-    :param workflow_path: Path to the API format JSON file.
-    :param inputs: Dictionary of node_id: {field: value} to override.
+    Runs a ComfyUI workflow.
+    :param workflow: The workflow JSON dictionary.
     :param server: Server address (IP or hostname)
     :param port: Port number
     """
@@ -48,51 +59,64 @@ def run_workflow(workflow_path, inputs=None, server=None, port=None):
     if server and port:
         server_address = f"{server}:{port}"
 
-    with open(workflow_path, 'r') as f:
-        workflow = json.load(f)
-
-    if inputs:
-        for node_id, overrides in inputs.items():
-            if node_id in workflow:
-                workflow[node_id].update(overrides)
-
-    print(f"Queueing workflow from {workflow_path}...")
-    prompt_id = queue_prompt(workflow)['prompt_id']
+    print(f"Queueing workflow...")
+    try:
+        prompt_id = queue_prompt(workflow)['prompt_id']
+    except KeyError:
+        print("Server returned unexpected response format.")
+        raise
 
     # Simple websocket listener to wait for completion
     ws = websocket.WebSocket()
-    ws.connect(f"ws://{server_address}/ws?clientId={client_id}")
+    try:
+        ws.connect(f"ws://{server_address}/ws?clientId={client_id}", timeout=30)
 
-    print("Waiting for workflow to complete...")
-    current_node = ""
-    output_images = {}
-    while True:
-        out = ws.recv()
-        if isinstance(out, str):
-            message = json.loads(out)
-            if message['type'] == 'executing':
-                data = message['data']
-                if data['node'] is None and data['prompt_id'] == prompt_id:
-                    break # Execution finished
-                current_node_id = data['node']
-                current_node = get_node(workflow, current_node_id)
-                print(f"Current Node: {current_node.get('class_type')}")
-        else:
-            # Binary frame — image data from SaveImageWebsocket
-            if current_node:
-                if current_node.get('class_type') == "ETN_SendImageWebSocket":
-                    images_output = output_images.get(current_node_id, [])
-                    # The first 8 bytes are type/meta, rest is image data
-                    images_output.append(out[8:])
-                    output_images[current_node_id] = images_output
+        print("Waiting for workflow to complete...")
+        current_node = None
+        output_images = {}
+
+        while True:
+            try:
+                out = ws.recv()
+                if isinstance(out, str):
+                    message = json.loads(out)
+                    if message['type'] == 'executing':
+                        data = message['data']
+                        if data['node'] is None and data['prompt_id'] == prompt_id:
+                            break # Execution finished
+
+                        current_node_id = data['node']
+                        current_node = get_node(workflow, current_node_id)
+                        if current_node:
+                            print(f"Current Node: {current_node.get('class_type')}")
+                else:
+                    # Binary frame — image data from SaveImageWebsocket
+                    if current_node and current_node.get('class_type') == "ETN_SendImageWebSocket":
+                        # Use the offset constant for better maintainability
+                        images_output = output_images.get(current_node_id, [])
+                        images_output.append(out[IMAGE_METADATA_OFFSET:])
+                        output_images[current_node_id] = images_output
+            except (websocket.WebSocketException, json.JSONDecodeError) as e:
+                print(f"WebSocket error during execution: {e}")
+                break
+    finally:
+        ws.close()
 
     print(f"Workflow {prompt_id} completed!")
 
     if output_images:
         print(f"Saving {len(output_images)} node(s) with images...")
         for node_id, images in output_images.items():
+            # Determine image format from the node configuration, defaulting to 'png'
+            node_config = workflow.get(node_id, {})
+            img_format = node_config.get('inputs', {}).get('format', 'png')
+            if isinstance(img_format, str):
+                img_format = img_format.lstrip('.')
+            else:
+                img_format = 'png'
+
             for i, img_data in enumerate(images):
-                filename = f"output_{prompt_id}_{node_id}_{i}.jpg"
+                filename = f"output_{prompt_id}_{node_id}_{i}.{img_format}"
                 save_image(img_data, filename)
                 print(f"Saved: {filename}")
     else:
@@ -105,12 +129,16 @@ if __name__ == "__main__":
     parser.add_argument("workflow_path", help="Path to the API format JSON file")
     parser.add_argument("--server", default="127.0.0.1", help="ComfyUI server address (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8188, help="ComfyUI port (default: 8188)")
-    parser.add_argument("--inputs", help="JSON string of input overrides (e.g. '{\"3\": {\"seed\": 123}}')")
 
     args = parser.parse_args()
 
     try:
-        overrides = json.loads(args.inputs) if args.inputs else None
-        run_workflow(args.workflow_path, overrides, args.server, args.port)
+        # Load the workflow JSON file in the main execution block
+        with open(args.workflow_path, 'r') as f:
+            workflow = json.load(f)
+
+        run_workflow(workflow, args.server, args.port)
+    except (json.JSONDecodeError, urllib.error.URLError, websocket.WebSocketException, FileNotFoundError) as e:
+        print(f"Task failed: {e}")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"An unexpected error occurred: {e}")
