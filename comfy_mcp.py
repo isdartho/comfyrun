@@ -1,13 +1,22 @@
 from fastmcp import FastMCP
-from fastmcp.utilities.types import Image
 import logging
 import json
 import os
+import base64
+from dotenv import load_dotenv
+from mcp.types import ImageContent
 from run_workflow import run_workflow, DEFAULT_CONFIG
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Using server and port from environment variables
+server = os.getenv("COMFY_SERVER", "127.0.0.1")
+port = int(os.getenv("COMFY_PORT", "8188"))
 
 # Create an MCP server
 mcp = FastMCP("ComfyRun Server")
@@ -26,7 +35,7 @@ def hello_mcp(name: str = "World") -> str:
     return f"Hello, {name}! The ComfyRun MCP server is online and working."
 
 @mcp.tool()
-def generate_image(prompt: str) -> str:
+def generate_image(prompt: str) -> ImageContent:
     """
     Generates an image using a pre-defined ComfyUI workflow and a given prompt.
 
@@ -51,19 +60,26 @@ def generate_image(prompt: str) -> str:
             return "Error: Node 6 not found in the example workflow."
 
         # Run workflow
-        # Using defaults for server and port as per run_workflow.py's typical usage if not provided
-        prompt_id, output_images = run_workflow(workflow, server="127.0.0.1", port=8188, config=DEFAULT_CONFIG)
+        prompt_id, output_images = run_workflow(workflow, server=server, port=port, config=DEFAULT_CONFIG)
 
         if not output_images:
             logger.warning("No images were returned from the workflow.")
             return "Error: No image data received from ComfyUI."
 
-        # Return the first image from the first node that returned images using fastmcp.Image
+        # Return the first image from the first node that returned images using ImageContent
         node_id = list(output_images.keys())[0]
         images = output_images[node_id]
 
-        # Return the first image data directly
-        return Image(data=images[0]['data'])
+        # Encode image data to base64 string
+        img_bytes = images[0]['data']
+        base64_image = base64.b64encode(img_bytes).decode('utf-8')
+        img_format = images[0]['format']
+
+        return ImageContent(
+            type="image",
+            data=base64_image,
+            mimeType=f"image/{img_format.lower()}"
+        )
 
     except FileNotFoundError:
         logger.error(f"Workflow file not found: {workflow_path}")
