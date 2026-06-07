@@ -11,10 +11,12 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Configuration Constants
-IMAGE_METADATA_OFFSET = 8 # Offset for binary image data from SaveImageWebsocket
-IMAGE_NODE_CLASS = "ETN_SendImageWebSocket"
-DEFAULT_IMAGE_FORMAT = "png"
+# Default Configuration
+DEFAULT_CONFIG = {
+    "image_metadata_offset": 8, # Offset for binary image data from SaveImageWebsocket
+    "image_node_class": "ETN_SendImageWebSocket", #Send Image (Websocket) class_type
+    "default_image_format": "png",
+}
 
 server_address = None # Global variable to be set by arguments
 client_id = str(uuid.uuid4())
@@ -55,15 +57,19 @@ def get_history(prompt_id):
         logger.error(f"Connection error while fetching history: {e}")
         raise
 
-def run_workflow(workflow, server=None, port=None):
+def run_workflow(workflow, server=None, port=None, config=None):
     """
     Runs a ComfyUI workflow.
     :param workflow: The workflow JSON dictionary.
     :param server: Server address (IP or hostname)
     :param port: Port number
+    :param config: Configuration dictionary (optional)
     :return: A tuple of (prompt_id, output_images)
     :output_images: {node_id: [{format: JPEG/PNG, data:(binary)}...]}
     """
+    if config is None:
+        config = DEFAULT_CONFIG
+
     global server_address
     if server and port:
         server_address = f"{server}:{port}"
@@ -100,16 +106,16 @@ def run_workflow(workflow, server=None, port=None):
                             logger.info(f"Current Node: {current_node.get('class_type')}")
                 else:
                     # Binary frame — image data from SaveImageWebsocket
-                    if current_node and current_node.get('class_type') == IMAGE_NODE_CLASS:
+                    if current_node and current_node.get('class_type') == config['image_node_class']:
                         # Use the offset constant for better maintainability
                         images_output = output_images.get(current_node_id, [])
-                        # Determine image format from the node configuration, defaulting to DEFAULT_IMAGE_FORMAT
-                        img_format = current_node.get('inputs', {}).get('format', DEFAULT_IMAGE_FORMAT)
+                        # Determine image format from the node configuration, defaulting to config['default_image_format']
+                        img_format = current_node.get('inputs', {}).get('format', config['default_image_format'])
                         if isinstance(img_format, str):
                             img_format = img_format.lstrip('.')
                         else:
-                            img_format = DEFAULT_IMAGE_FORMAT
-                        images_output.append({ 'format':img_format, 'data':out[IMAGE_METADATA_OFFSET:] })
+                            img_format = config['default_image_format']
+                        images_output.append({ 'format':img_format, 'data':out[config['image_metadata_offset']:] })
                         output_images[current_node_id] = images_output
             except (websocket.WebSocketException, json.JSONDecodeError) as e:
                 logger.error(f"WebSocket error during execution: {e}")
@@ -133,7 +139,7 @@ if __name__ == "__main__":
         with open(args.workflow_path, 'r') as f:
             workflow = json.load(f)
 
-        prompt_id, output_images = run_workflow(workflow, args.server, args.port)
+        prompt_id, output_images = run_workflow(workflow, args.server, args.port, config=DEFAULT_CONFIG)
         if output_images:
             logger.info(f"Saving {len(output_images)} node(s) with images...")
             for node_id, images in output_images.items(): #For each node that has image

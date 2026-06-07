@@ -22,7 +22,7 @@ ComfyRun is a lightweight Python utility designed to execute ComfyUI workflows v
 ### Prerequisites
 - Python 3.x
 - A running instance of ComfyUI with the API enabled.
-- The `ETN_SendImageWebSocket` node from [comfyui-tooling-nodes](https://github.com/Acly/comfyui-tooling-nodes) (or a compatible custom node that sends binary image data over WebSockets).
+- The `ETN_SendImageWebSocket` node from [comfyui-tooling-nodes](https://github.com/Acly/comfyui-tooling-nodes) (or a compatible custom node that sends binary image data over WebSockets, just make sure to add the class_type to [image_node_class] in config for run_workflow).
   
   ![Example Workflow](workflows/example_workflow_zit.png)
 
