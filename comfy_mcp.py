@@ -1,4 +1,5 @@
-from fastmcp import FastMCP, Image
+from fastmcp import FastMCP
+from fastmcp.utilities.types import Image
 import logging
 import json
 import os
