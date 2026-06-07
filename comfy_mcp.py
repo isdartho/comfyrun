@@ -1,8 +1,8 @@
-from fastmcp import FastMCP
+from fastmcp import FastMCP, Image
 import logging
 import json
 import os
-from run_workflow import run_workflow, save_image, DEFAULT_CONFIG
+from run_workflow import run_workflow, DEFAULT_CONFIG
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -57,21 +57,12 @@ def generate_image(prompt: str) -> str:
             logger.warning("No images were returned from the workflow.")
             return "Error: No image data received from ComfyUI."
 
-        # Save the first image from the first node that returned images
+        # Return the first image from the first node that returned images using fastmcp.Image
         node_id = list(output_images.keys())[0]
         images = output_images[node_id]
 
-        # We only save the first image for this tool
-        img_data = images[0]
-        img_format = img_data['format']
-        filename = f"output_{prompt_id}_{node_id}_0.{img_format}"
-
-        save_image(img_data['data'], filename)
-
-        full_path = os.path.abspath(os.path.join("output", filename))
-        logger.info(f"Image saved to {full_path}")
-
-        return f"Image successfully generated and saved to: {full_path}"
+        # Return the first image data directly
+        return Image(data=images[0]['data'])
 
     except FileNotFoundError:
         logger.error(f"Workflow file not found: {workflow_path}")
