@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  comfyrun:
+    build: .
+    ports:
+      - "8000:8000"  # Adjust based on your actual port usage
+    volumes:
+      - ./output:/app/output  # Persist output directory
+      - ./workflows:/app/workflows  # Persist workflows
+      - ./.env:/app/.env  # Environment variables
+    environment:
+      - PYTHONUNBUFFERED=1
+      - COMFY_SERVER=host.docker.internal
+      - COMFY_PORT=8188
+    # Command will be overridden when running the container
+    # Example usage:
+    # docker-compose run comfyrun  # Runs the MCP server by default
+    # For direct workflow execution (override command):
+    # docker-compose run comfyrun python run_workflow.py /app/workflows/example.json
