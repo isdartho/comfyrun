@@ -6,7 +6,6 @@ import urllib.parse
 import argparse
 import os
 import logging
-
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -18,7 +17,6 @@ DEFAULT_CONFIG = {
     "default_image_format": "png",
 }
 
-server_address = None # Global variable to be set by arguments
 client_id = str(uuid.uuid4())
 
 def save_image(image_data, filename):
@@ -38,7 +36,7 @@ def get_node(workflow, node_id):
     """
     return workflow.get(node_id)
 
-def queue_prompt(prompt):
+def queue_prompt(prompt, server_address):
     p = {"prompt": prompt, "client_id": client_id}
     data = json.dumps(p).encode('utf-8')
     req = urllib.request.Request(f"http://{server_address}/prompt", data=data)
@@ -49,7 +47,7 @@ def queue_prompt(prompt):
         logger.error(f"Connection error while queueing prompt: {e}")
         raise
 
-def get_history(prompt_id):
+def get_history(prompt_id, server_address):
     try:
         with urllib.request.urlopen(f"http://{server_address}/history/{prompt_id}", timeout=30) as response:
             return json.loads(response.read())
@@ -70,13 +68,13 @@ def run_workflow(workflow, server=None, port=None, config=None):
     if config is None:
         config = DEFAULT_CONFIG
 
-    global server_address
-    if server and port:
-        server_address = f"{server}:{port}"
+    if server is None or port is None:
+        raise ValueError("Server and port must be provided")
+    server_address = f"{server}:{port}"
 
     logger.info("Queueing workflow...")
     try:
-        prompt_id = queue_prompt(workflow)['prompt_id']
+        prompt_id = queue_prompt(workflow, server_address)['prompt_id']
     except KeyError:
         logger.error("Server returned unexpected response format.")
         raise
@@ -103,7 +101,7 @@ def run_workflow(workflow, server=None, port=None, config=None):
                         current_node_id = data['node']
                         current_node = get_node(workflow, current_node_id)
                         if current_node:
-                            logger.info(f"Current Node: {current_node.get('class_type')}")
+                            logger.info(f"Current Node[{current_node_id}]: {current_node.get('class_type')}")
                 else:
                     # Binary frame — image data from SaveImageWebsocket
                     if current_node and current_node.get('class_type') == config['image_node_class']:
@@ -133,6 +131,31 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8188, help="ComfyUI port (default: 8188)")
 
     args = parser.parse_args()
+
+    # Override defaults with environment variables if set
+    # Support both naming conventions for backward compatibility
+    # Only override if using the argparse defaults (to allow explicit CLI args to take precedence)
+
+    # Server address - check both COMFYUI_SERVER (legacy) and COMFY_SERVER (MCP)
+    if args.server == "127.0.0.1":
+        if "COMFYUI_SERVER" in os.environ:
+            args.server = os.environ["COMFYUI_SERVER"]
+        elif "COMFY_SERVER" in os.environ:
+            args.server = os.environ["COMFY_SERVER"]
+
+    # Port - check both COMFYUI_PORT (legacy) and COMFY_PORT (MCP)
+    if args.port == 8188:
+        port_env = None
+        if "COMFYUI_PORT" in os.environ:
+            port_env = os.environ["COMFYUI_PORT"]
+        elif "COMFY_PORT" in os.environ:
+            port_env = os.environ["COMFY_PORT"]
+
+        if port_env is not None:
+            try:
+                args.port = int(port_env)
+            except ValueError:
+                logger.warning(f"Invalid port value: {port_env}, using default")
 
     try:
         # Load the workflow JSON file in the main execution block
